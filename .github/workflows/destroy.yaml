@@ -1,0 +1,52 @@
+# 
+# GitHub Actions workflow.
+#
+# Automatically deploys the python microservice to Kubernetes on push to any branch. 
+# For real use you might want to restrict this to the "prod" branch.
+#
+
+name: Terraform destoy
+
+on:
+  #
+  # Allows deployment to be invoked manually through the GitHub Actions user interface.
+  #
+  workflow_dispatch: 
+
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      
+      # Checks-out your repository under $GITHUB_WORKSPACE.
+      - uses: actions/checkout@v3
+      
+      # Azure login using Service Principal credentials from GitHub Secrets
+      - name: Azure Login
+        run: az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+
+      # Run az cli commands
+      - name: List Azure Resource Groups
+        run: az group list
+
+      # Set up Terraform
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.6
+      
+      - name: Terraform init
+        run: terraform init
+        working-directory: scripts/terraform
+  
+      # Destroy Terraform
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -var "resource_group_name=${{ vars.AZURE_RESOURCE_NAME }}" -var "location=${{ vars.AZURE_RESOURCE_LOCATION }}" -var "app_name=${{ vars.APP_NAME }}" -var "kubernetes_version=${{ vars.AZURE_AKS_VERSION }}"
+
+        working-directory: scripts/terraform  
+
+      - name: Refresh terraform
+        run: terraform refresh
+        working-directory: scripts/terraform  

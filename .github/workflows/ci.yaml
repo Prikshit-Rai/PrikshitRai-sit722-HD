@@ -1,0 +1,41 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.9'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r book_catalog/requirements.txt
+          pip install -r inventory_management/requirements.txt
+
+      - name: Run Unit Tests
+        run: |
+          pytest book_catalog/app/tests/
+          pytest inventory_management/app/tests/
+
+      - name: Build Docker Image
+        run: |
+          docker-compose -f docker-compose.yml build
+
+      - name: Deploy to Azure (Optional)
+        uses: azure/CLI@v1
+        with:
+          inlineScript: |
+            az aks get-credentials --resource-group taskHDprikshit --name taskHDprikshit
+            kubectl apply -f deployment.yaml

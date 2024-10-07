@@ -1,0 +1,96 @@
+# 
+# GitHub Actions workflow.
+#
+# Automatically deploys the python microservice to Kubernetes on push to any branch. 
+# For real use you might want to restrict this to the "prod" branch.
+#
+
+name: Terraform integration
+
+on:
+  #
+  # Allows deployment to be invoked manually through the GitHub Actions user interface.
+  #
+  workflow_dispatch: 
+  
+jobs:
+
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      
+      # Checks-out your repository under $GITHUB_WORKSPACE.
+      - uses: actions/checkout@v3
+
+      # Azure login using Service Principal credentials from GitHub Secrets
+      # Previously : az ad sp create-for-rbac --name "Deakin labs DS - 1216" --role Owner --scopes /subscriptions/1af860c3-e4f4-4c2c-9b63-46be27b4406b
+      # creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Azure Login
+        # uses: azure/login@v1
+        # with:
+        #   creds: ${{ secrets.AZURE_CREDENTIALS }}
+        run: az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+
+      # Run az cli commands
+      - name: List Azure Resource Groups
+        run: az group list
+
+      # Set up Terraform
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.6
+
+      # Initialize Terraform
+      - name: Terraform Init
+        run: terraform init
+        working-directory: scripts/terraform
+
+      # Run Terraform plan
+      - name: Terraform Plan
+        run: terraform plan
+        working-directory: scripts/terraform
+        continue-on-error: true
+
+      # Optionally, apply Terraform changes (use cautiously in production!)
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve
+        working-directory: scripts/terraform
+        continue-on-error: true
+      
+      # Upload Terraform state file to GIT
+      - name: Upload Terraform state file
+        uses: actions/upload-artifact@v3
+        with:
+          name: terraform-state-file
+          path: ./scripts/terraform/terraform.tfstate
+
+      # Install required dependencies
+      - name: Install dependencies
+        run: |
+          sudo apt install gh -y
+          sudo apt install jq -y
+
+      # Login tot GitHub-CLI using token
+      - name: GitHub-Cli login
+        run: |
+          echo "${{ secrets.TOKEN }}" | gh auth login --with-token
+
+      # Refresh terraform state
+      - name: Refresh terraform state
+        run: terraform refresh
+
+      # Set Container registry, registry username, password and kubernetes config
+      - name: Set Secrets
+        run: |
+          azure_container_registry_name="taskHDprikshit"
+          gh secret set CONTAINER_REGISTRY --body "$azure_container_registry_name"
+
+          az acr credential show --name "$azure_container_registry_name" --query "{username:username, passwords:passwords[0].value}" --output json > credentials.json
+          gh secret set REGISTRY_UN --body "$(cat credentials.json | jq -r '.username')"
+          gh secret set REGISTRY_PW --body "$(cat credentials.json | jq -r '.passwords')"
+          
+          az aks get-credentials --resource-group taskHDprikshit --name taskHDprikshit
+          gh secret set KUBE_CONFIG --body "$(cat ~/.kube/config | base64 -w 0)"
